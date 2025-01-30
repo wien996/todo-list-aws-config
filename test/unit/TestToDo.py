@@ -10,7 +10,7 @@ import json
 @mock_dynamodb2
 class TestDatabaseFunctions(unittest.TestCase):
     def setUp(self):
-        print ('---------------------')
+        print ('---------prueba------------')
         print ('Start: setUp')
         warnings.filterwarnings(
             "ignore",
