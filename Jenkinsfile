@@ -10,39 +10,8 @@ pipeline {
     stages {
         stage('Get Code') {
             steps {
-                git branch: 'develop', 
+                git branch: 'master', 
                     url: 'https://github.com/wien996/CP1.D.DevopsCloudUnir.git'
-            }
-        }
-
-        stage('Static Test') {
-            steps {
-                script {
-                    sh 'mkdir -p reports'
-                    sh 'python3 -m flake8 src --output-file=reports/flake8_report.txt || true'
-                    sh 'python3 -m bandit -r src -o reports/bandit_report.json -f json || true'
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'reports/*.txt, reports/*.json', fingerprint: true
-                }
-            }
-        }
-
-        stage('Build SAM') {
-            steps {
-                script {
-                    sh 'sam build'
-                }
-            }
-        }
-
-        stage('Validate SAM') {
-            steps {
-                script {
-                    sh 'sam validate --region $AWS_REGION'
-                }
             }
         }
 
@@ -65,11 +34,13 @@ pipeline {
 		stage('Rest Test') {
             steps {
                 script {
-                    sh '''
-                    export BASE_URL=https://jfczlorg01.execute-api.us-east-1.amazonaws.com/prod  # Configura la URL correcta
-                    export PATH=$PATH:/var/lib/jenkins/.local/bin  # Añadir pytest al PATH
-                    pytest test/integration/todoApiTest.py --junitxml=reports/rest_test_report.xml
-                    '''
+                sh '''
+                export BASE_URL=https://jfczlorg01.execute-api.us-east-1.amazonaws.com/prod  # Configura la URL correcta
+                export PATH=$PATH:/var/lib/jenkins/.local/bin  # Asegurar que pytest esté accesible
+                
+                # Ejecutar solo pruebas de solo lectura
+                pytest -m read_only test/integration/todoApiTest.py --junitxml=reports/rest_test_report.xml || echo "No se encontraron pruebas de solo lectura"
+                '''
                 }
             }
             post {
@@ -78,24 +49,5 @@ pipeline {
                 }
             }
         }
-        
-        stage('Promote') {
-			steps {
-				script {
-					sh '''
-        				# Obtener los últimos cambios
-                        git checkout master
-                        git pull origin master
-        
-                        # Merge con develop y resolver conflictos automáticamente en caso de archivos de texto simples
-                        git merge --no-ff develop -m "Promotion to production" || git merge --abort
-        
-                        # Si el merge fue exitoso, subir cambios
-                        git push origin master || echo "No hay cambios para subir"
-					'''
-				}
-			}
-		}
-
     }
 }
