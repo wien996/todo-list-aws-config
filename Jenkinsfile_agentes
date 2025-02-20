@@ -1,0 +1,137 @@
+pipeline {
+    agent none
+
+    environment {
+        AWS_REGION = 'us-east-1'
+        S3_BUCKET = 'aws-sam-cli-managed-default-samclisourcebucket-b7zkzyspcxu0'
+        STACK_NAME = 'staging-todo-list-aws'
+    }
+
+    stages {
+        stage('Get Code') {
+            agent { label 'MainNodeAgent' }
+            steps {
+                sh 'whoami && hostname'
+                git branch: 'develop', 
+                    url: 'https://github.com/wien996/CP1.D.DevopsCloudUnir.git'
+            }
+        }
+
+        stage('Verify Branch Sync') {
+            agent { label 'MainNodeAgent' }
+            steps {
+                script {
+                    sh 'git fetch origin'
+                    sh 'git status'
+                    sh '[ "$(git rev-parse master)" = "$(git rev-parse origin/master)" ] || echo "WARNING: master is not synchronized"'
+                    sh '[ "$(git rev-parse develop)" = "$(git rev-parse origin/develop)" ] || echo "WARNING: develop is not synchronized"'
+                }
+            }
+        }
+
+        stage('Static Test') {
+            agent { label 'static-analysis-agent' }
+            steps {
+                sh 'whoami && hostname'
+                script {
+                    sh 'mkdir -p reports'
+                    sh 'python3 -m flake8 src --output-file=reports/flake8_report.txt || true'
+                    sh 'python3 -m bandit -r src -o reports/bandit_report.json -f json || true'
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/*.txt, reports/*.json', fingerprint: true
+                }
+            }
+        }
+
+        stage('Build SAM') {
+            agent { label 'MainNodeAgent' }
+            steps {
+                sh 'whoami && hostname'
+                script {
+                    sh 'sam build'
+                }
+            }
+        }
+
+        stage('Validate SAM') {
+            agent { label 'MainNodeAgent' }
+            steps {
+                sh 'whoami && hostname'
+                script {
+                    sh 'sam validate --region $AWS_REGION'
+                }
+            }
+        }
+
+        stage('Deploy SAM') {
+            agent { label 'MainNodeAgent' }
+            steps {
+                sh 'whoami && hostname'
+                script {
+                    sh '''
+                    sam deploy \
+                        --stack-name $STACK_NAME \
+                        --s3-bucket $S3_BUCKET \
+                        --region $AWS_REGION \
+                        --capabilities CAPABILITY_IAM \
+                        --no-confirm-changeset \
+                        --no-fail-on-empty-changeset
+                    '''
+                }
+            }
+        }
+        
+        stage('Retrieve API URL') {
+            agent { label 'MainNodeAgent' }
+            steps {
+                sh 'whoami && hostname'
+                script {
+                    def apiUrl = sh(script: "aws cloudformation describe-stacks --stack-name $STACK_NAME --region $AWS_REGION --query \"Stacks[0].Outputs[?OutputKey=='ApiGatewayInvokeURL'].OutputValue\" --output text", returnStdout: true).trim()
+                    if (!apiUrl) {
+                        error("No se pudo obtener la URL del API Gateway")
+                    }
+                    env.BASE_URL = apiUrl
+                }
+            }
+        }
+        
+        stage('Rest Test') {
+            agent { label 'rest-test-agent' }
+            steps {
+                sh 'whoami && hostname'
+                script {
+                    sh '''
+                        export BASE_URL=https://jfczlorg01.execute-api.us-east-1.amazonaws.com/prod
+                        export PATH=$PATH:/var/lib/jenkins/.local/bin
+                                       
+                        # Ejecutar pruebas de integración
+                        pytest /var/lib/jenkins/workspace/CP1D.3-DevelopAgentes-todo-list-aws/test/integration/todoApiTest.py --junitxml=reports/rest_test_report.xml || echo "No se encontraron pruebas de solo lectura"
+                    '''
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/*.xml', fingerprint: true
+                }
+            }
+        }
+        
+        stage('Promote') {
+            agent { label 'MainNodeAgent' }
+            steps {
+                sh 'whoami && hostname'
+                script {
+                    sh '''
+                        git checkout master
+                        git pull origin master
+                        git merge --no-ff develop -m "Promotion to production" || git merge --abort
+                        git push origin master || echo "No hay cambios para subir"
+                    '''
+                }
+            }
+        }
+    }
+}
