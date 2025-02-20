@@ -12,7 +12,7 @@ pipeline {
             agent { label 'MainNodeAgent' }
             steps {
                 sh 'whoami && hostname'
-                git branch: 'develop', 
+                git branch: 'master', 
                     url: 'https://github.com/wien996/CP1.D.DevopsCloudUnir.git'
             }
         }
